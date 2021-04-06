@@ -1,5 +1,6 @@
 import { bind, Subscribe } from "@react-rxjs/core"
 import { combineKeys, createKeyedSignal, createSignal } from "@react-rxjs/utils"
+import { memo } from "react"
 import { combineLatest, concat, EMPTY, pipe } from "rxjs"
 import { map, pluck, scan, switchMap } from "rxjs/operators"
 import {
@@ -107,7 +108,7 @@ const CurrencySelector: React.FC<{
   )
 }
 
-const Orderline: React.FC<{ id: string }> = ({ id }) => {
+const Orderline: React.FC<{ id: string }> = memo(({ id }) => {
   const order = useOrder(id)
   return (
     <tr>
@@ -131,7 +132,7 @@ const Orderline: React.FC<{ id: string }> = ({ id }) => {
       <td>{formatPrice(order.baseCurrencyPrice)} £</td>
     </tr>
   )
-}
+})
 
 const Orders = () => {
   const orderIds = useOrderIds()
