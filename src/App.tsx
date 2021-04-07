@@ -111,11 +111,13 @@ const CurrenciesProvider: React.FC = ({ children }) => {
     ratesReducer,
     initialCurrencyRatesState,
   )
-  const debouncedCall = useKeyedDebounce(async (id: string, rate: number) => {
-    dispatch({ type: "StartIsValidRequest", payload: id })
-    const result = await isCurrecyRateValid(id, rate)
-    dispatch({ type: "IsValidResult", payload: { id, result } })
-  })
+  const debouncedCall = useKeyedDebounce(
+    useCallQueue(async (id: string, rate: number) => {
+      dispatch({ type: "StartIsValidRequest", payload: id })
+      const result = await isCurrecyRateValid(id, rate)
+      dispatch({ type: "IsValidResult", payload: { id, result } })
+    }),
+  )
 
   const effectDispatch: Dispatch<RatesAction> = (action) => {
     if (action.type === "EditCurrencyRate") {
@@ -131,6 +133,39 @@ const CurrenciesProvider: React.FC = ({ children }) => {
       </CurrencyRatesContextProvider>
     </CurrenciesContextProvider>
   )
+}
+
+const useCallQueue = <TArgs extends any[]>(
+  fn: (...args: TArgs) => Promise<any>,
+  config = {
+    maxCalls: 3,
+    timeWindow: 60_000,
+  },
+) => {
+  const queueState = useRef({
+    activeCalls: 0,
+    callQueue: [] as TArgs[],
+  })
+
+  const performCall = (...args: TArgs) => {
+    if (queueState.current.activeCalls >= config.maxCalls) {
+      queueState.current.callQueue.push(args)
+      return
+    }
+
+    queueState.current.activeCalls++
+    Promise.all([
+      fn(...args),
+      new Promise((resolve) => setTimeout(resolve, config.timeWindow)),
+    ]).then(() => {
+      queueState.current.activeCalls--
+      const firstQueue = queueState.current.callQueue.shift()
+      if (firstQueue) {
+        performCall(...firstQueue)
+      }
+    })
+  }
+  return performCall
 }
 
 const useKeyedDebounce = <T extends (id: string, ...args: any[]) => void>(
