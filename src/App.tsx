@@ -1,4 +1,11 @@
-import { createContext, Dispatch, memo, useContext, useReducer } from "react"
+import {
+  createContext,
+  Dispatch,
+  memo,
+  useContext,
+  useReducer,
+  useRef,
+} from "react"
 import {
   initialCurrencyRates,
   formatCurrency,
@@ -10,6 +17,7 @@ import {
   getBaseCurrencyPrice,
   getRandomOrder,
   uuidv4,
+  isCurrecyRateValid,
 } from "./utils"
 
 const initialCurrencies = Object.keys(initialCurrencyRates)
@@ -51,7 +59,15 @@ interface EditCurrencyRate {
   type: "EditCurrencyRate"
   payload: { id: string; rate: number }
 }
-type RatesAction = EditCurrencyRate
+interface StartIsValidRequest {
+  type: "StartIsValidRequest"
+  payload: string
+}
+interface IsValidResult {
+  type: "IsValidResult"
+  payload: { id: string; result: boolean }
+}
+type RatesAction = EditCurrencyRate | StartIsValidRequest | IsValidResult
 function ratesReducer(prev: Record<string, CurrencyRate>, action: RatesAction) {
   switch (action.type) {
     case "EditCurrencyRate":
@@ -62,18 +78,67 @@ function ratesReducer(prev: Record<string, CurrencyRate>, action: RatesAction) {
           state: CurrencyRateState.DIRTY,
         },
       }
+    case "StartIsValidRequest":
+      return {
+        ...prev,
+        [action.payload]: {
+          ...prev[action.payload],
+          state: CurrencyRateState.IN_PROGRESS,
+        },
+      }
+    case "IsValidResult":
+      return {
+        ...prev,
+        [action.payload.id]: {
+          ...prev[action.payload.id],
+          state: action.payload.result
+            ? CurrencyRateState.ACCEPTED
+            : CurrencyRateState.DIRTY,
+        },
+      }
   }
 }
 
 const CurrenciesProvider: React.FC = ({ children }) => {
-  const currencyRates = useReducer(ratesReducer, initialCurrencyRatesState)
+  const [currencyRates, dispatch] = useReducer(
+    ratesReducer,
+    initialCurrencyRatesState,
+  )
+  const debouncedCall = useKeyedDebounce(async (id: string, rate: number) => {
+    dispatch({ type: "StartIsValidRequest", payload: id })
+    const result = await isCurrecyRateValid(id, rate)
+    dispatch({ type: "IsValidResult", payload: { id, result } })
+  })
+
+  const effectDispatch: Dispatch<RatesAction> = (action) => {
+    if (action.type === "EditCurrencyRate") {
+      debouncedCall(action.payload.id, action.payload.rate)
+    }
+    return dispatch(action)
+  }
+
   return (
     <CurrenciesContextProvider value={initialCurrencies}>
-      <CurrencyRatesContextProvider value={currencyRates}>
+      <CurrencyRatesContextProvider value={[currencyRates, effectDispatch]}>
         {children}
       </CurrencyRatesContextProvider>
     </CurrenciesContextProvider>
   )
+}
+
+const useKeyedDebounce = <T extends (id: string, ...args: any[]) => void>(
+  fn: T,
+  timeout = 300,
+): T => {
+  const debounceStates = useRef<Record<string, any>>({})
+
+  return ((id: string, ...args: any[]) => {
+    if (debounceStates.current[id]) {
+      clearTimeout(debounceStates.current[id])
+    }
+
+    debounceStates.current[id] = setTimeout(() => fn(id, ...args), timeout)
+  }) as any
 }
 
 interface AddOrder {
