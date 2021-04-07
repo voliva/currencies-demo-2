@@ -34,6 +34,7 @@ enum CurrencyRateState {
 interface CurrencyRate {
   rate: number
   state: CurrencyRateState
+  confirmedRate: number
 }
 
 const initialCurrencyRatesState = Object.fromEntries(
@@ -43,6 +44,7 @@ const initialCurrencyRatesState = Object.fromEntries(
         id,
         {
           rate,
+          confirmedRate: rate,
           state: CurrencyRateState.ACCEPTED,
         },
       ] as [string, CurrencyRate],
@@ -74,6 +76,7 @@ function ratesReducer(prev: Record<string, CurrencyRate>, action: RatesAction) {
       return {
         ...prev,
         [action.payload.id]: {
+          ...prev[action.payload.id],
           rate: action.payload.rate,
           state: CurrencyRateState.DIRTY,
         },
@@ -87,13 +90,17 @@ function ratesReducer(prev: Record<string, CurrencyRate>, action: RatesAction) {
         },
       }
     case "IsValidResult":
+      const previousState = prev[action.payload.id]
+      const newRate = action.payload.result
+        ? previousState.rate
+        : previousState.confirmedRate
       return {
         ...prev,
         [action.payload.id]: {
-          ...prev[action.payload.id],
-          state: action.payload.result
-            ? CurrencyRateState.ACCEPTED
-            : CurrencyRateState.DIRTY,
+          ...previousState,
+          state: CurrencyRateState.ACCEPTED,
+          rate: newRate,
+          confirmedRate: newRate,
         },
       }
   }
@@ -297,7 +304,7 @@ const Orders = () => {
           key={id}
           order={order}
           dispatch={dispatch}
-          currencyRate={currencyRates[order.currency].rate}
+          currencyRate={currencyRates[order.currency].confirmedRate}
         />
       ))}
     </Table>
@@ -322,7 +329,10 @@ const OrderTotal = () => {
   const [currencyRates] = useCurrencyRates()
   const total = Object.values(orders)
     .map((order) =>
-      getBaseCurrencyPrice(order.price, currencyRates[order.currency].rate),
+      getBaseCurrencyPrice(
+        order.price,
+        currencyRates[order.currency].confirmedRate,
+      ),
     )
     .reduce((a, b) => a + b, 0)
   return <div className="total">{formatPrice(total)} £</div>
