@@ -1,11 +1,4 @@
-import {
-  createContext,
-  Dispatch,
-  memo,
-  useContext,
-  useReducer,
-  useState,
-} from "react"
+import { createContext, Dispatch, memo, useContext, useReducer } from "react"
 import {
   initialCurrencyRates,
   formatCurrency,
@@ -19,21 +12,61 @@ import {
   uuidv4,
 } from "./utils"
 
-type SetState<T> = React.Dispatch<React.SetStateAction<T>>
-
 const initialCurrencies = Object.keys(initialCurrencyRates)
 const currenciesContext = createContext(initialCurrencies)
 const useCurrencies = () => useContext(currenciesContext)
 const { Provider: CurrenciesContextProvider } = currenciesContext
 
+enum CurrencyRateState {
+  ACCEPTED,
+  DIRTY,
+  IN_PROGRESS,
+}
+
+interface CurrencyRate {
+  rate: number
+  state: CurrencyRateState
+}
+
+const initialCurrencyRatesState = Object.fromEntries(
+  Object.entries(initialCurrencyRates).map(
+    ([id, rate]) =>
+      [
+        id,
+        {
+          rate,
+          state: CurrencyRateState.ACCEPTED,
+        },
+      ] as [string, CurrencyRate],
+  ),
+)
+
 const currencyRatesContext = createContext<
-  [Record<string, number>, SetState<Record<string, number>>]
->([initialCurrencyRates, () => {}])
+  [Record<string, CurrencyRate>, Dispatch<RatesAction>]
+>([initialCurrencyRatesState, () => {}])
 const useCurrencyRates = () => useContext(currencyRatesContext)
 const { Provider: CurrencyRatesContextProvider } = currencyRatesContext
 
+interface EditCurrencyRate {
+  type: "EditCurrencyRate"
+  payload: { id: string; rate: number }
+}
+type RatesAction = EditCurrencyRate
+function ratesReducer(prev: Record<string, CurrencyRate>, action: RatesAction) {
+  switch (action.type) {
+    case "EditCurrencyRate":
+      return {
+        ...prev,
+        [action.payload.id]: {
+          rate: action.payload.rate,
+          state: CurrencyRateState.DIRTY,
+        },
+      }
+  }
+}
+
 const CurrenciesProvider: React.FC = ({ children }) => {
-  const currencyRates = useState(initialCurrencyRates)
+  const currencyRates = useReducer(ratesReducer, initialCurrencyRatesState)
   return (
     <CurrenciesContextProvider value={initialCurrencies}>
       <CurrencyRatesContextProvider value={currencyRates}>
@@ -94,20 +127,26 @@ const OrdersProvider: React.FC = ({ children }) => {
   )
 }
 
-const CurrencyRate: React.FC<{
+const CurrencyRateComponent: React.FC<{
   currency: string
-  rate: number
-  setCurrencyRates: SetState<Record<string, number>>
-}> = memo(({ currency, rate, setCurrencyRates }) => {
+  currencyRate: CurrencyRate
+  setCurrencyRate: (id: string, rate: number) => void
+}> = memo(({ currency, currencyRate, setCurrencyRate }) => {
+  const isDisabled = currencyRate.state === CurrencyRateState.IN_PROGRESS
+  const backgroundColor =
+    currencyRate.state === CurrencyRateState.ACCEPTED ? "limegreen" : undefined
+
   return (
     <tr key={currency}>
       <td>{formatCurrency(currency)}</td>
       <td>
         <NumberInput
-          value={rate}
-          onChange={(value) => {
-            setCurrencyRates((prev) => ({ ...prev, [currency]: value }))
+          value={currencyRate.rate}
+          onChange={(value) => setCurrencyRate(currency, value)}
+          style={{
+            backgroundColor,
           }}
+          disabled={isDisabled}
         />
       </td>
     </tr>
@@ -115,15 +154,17 @@ const CurrencyRate: React.FC<{
 })
 
 const Currencies = () => {
-  const [currencyRates, setCurrencyRates] = useCurrencyRates()
+  const [currencyRates, dispatch] = useCurrencyRates()
   return (
     <Table columns={["Currency", "Exchange rate"]}>
       {Object.entries(currencyRates).map(([currency, rate]) => (
-        <CurrencyRate
+        <CurrencyRateComponent
           key={currency}
           currency={currency}
-          rate={rate}
-          setCurrencyRates={setCurrencyRates}
+          currencyRate={rate}
+          setCurrencyRate={(id, rate) =>
+            dispatch({ type: "EditCurrencyRate", payload: { id, rate } })
+          }
         />
       ))}
     </Table>
@@ -191,7 +232,7 @@ const Orders = () => {
           key={id}
           order={order}
           dispatch={dispatch}
-          currencyRate={currencyRates[order.currency]}
+          currencyRate={currencyRates[order.currency].rate}
         />
       ))}
     </Table>
@@ -216,7 +257,7 @@ const OrderTotal = () => {
   const [currencyRates] = useCurrencyRates()
   const total = Object.values(orders)
     .map((order) =>
-      getBaseCurrencyPrice(order.price, currencyRates[order.currency]),
+      getBaseCurrencyPrice(order.price, currencyRates[order.currency].rate),
     )
     .reduce((a, b) => a + b, 0)
   return <div className="total">{formatPrice(total)} £</div>
